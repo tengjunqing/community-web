@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir /a \"d:\\\\Workspace\\\\vscode-cc\")",
+      "Bash(Get-ChildItem -Path \"d:\\\\Workspace\\\\vscode-cc\" -Force)",
+      "Bash(Format-Table Name, Mode, LastWriteTime -AutoSize)",
+      "Bash(docker exec *)",
+      "Bash(docker-compose build *)",
+      "Bash(docker-compose up *)"
+    ]
+  }
+}

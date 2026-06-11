@@ -1,0 +1,56 @@
+services:
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: social-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - social-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 后端服务
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: social-backend
+    environment:
+      - DATABASE_URL=mysql+aiomysql://root:Qq987654321@host.docker.internal:3306/mydb
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=your-secret-key-change-in-production
+      - DEBUG=False
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/uploads:/app/uploads
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - social-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # 前端服务
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: social-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - social-network
+    restart: unless-stopped
+
+networks:
+  social-network:
+    driver: bridge
