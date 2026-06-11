@@ -36,6 +36,27 @@ class TestAuth:
         response = register_user(client, "newuser", "new@example.com", "123")
         assert response.status_code == 422
 
+    def test_register_short_username(self, client):
+        """测试短用户名注册（边界条件）"""
+        response = register_user(client, "ab", "new@example.com", "password123")
+        assert response.status_code == 422
+
+    def test_register_long_username(self, client):
+        """测试长用户名注册（边界条件）"""
+        long_username = "a" * 51
+        response = register_user(client, long_username, "new@example.com", "password123")
+        assert response.status_code == 422
+
+    def test_register_special_characters_username(self, client):
+        """测试特殊字符用户名"""
+        response = register_user(client, "user@#$%", "new@example.com", "password123")
+        assert response.status_code in [201, 422]
+
+    def test_register_empty_fields(self, client):
+        """测试空字段注册"""
+        response = client.post("/api/v1/auth/register", json={})
+        assert response.status_code == 422
+
     def test_login(self, client):
         """测试用户登录"""
         register_user(client, "testuser", "test@example.com", "testpassword123")
@@ -74,6 +95,12 @@ class TestAuth:
     def test_get_me_unauthorized(self, client):
         """测试未认证获取用户信息"""
         response = client.get("/api/v1/auth/me")
+        assert response.status_code == 401
+
+    def test_get_me_invalid_token(self, client):
+        """测试无效令牌获取用户信息"""
+        headers = {"Authorization": "Bearer invalid-token"}
+        response = client.get("/api/v1/auth/me", headers=headers)
         assert response.status_code == 401
 
     def test_refresh_token(self, client):
