@@ -1,45 +1,64 @@
-"""测试配置 - 使用 FastAPI TestClient 进行进程内测试"""
+"""测试配置 - 使用 FastAPI TestClient + SQLite 内存数据库进行进程内测试"""
 
 import sys
 import os
 import pytest
-import sqlalchemy
+import asyncio
 from starlette.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import BigInteger, create_engine, event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 # 将 tests 目录加入 Python 路径
 sys.path.insert(0, os.path.dirname(__file__))
 
+# SQLite 不支持 BigInteger 自动递增，需要让 BigInteger 编译为 INTEGER
+from sqlalchemy.ext.compiler import compiles
+
+
+@compiles(BigInteger, "sqlite")
+def bi_c(element, compiler, **kw):
+    return "INTEGER"
+
+
+# 在导入 app 模块之前，替换 database.py 中的引擎为 SQLite
+import app.database as _db_module
+
+TEST_ASYNC_URL = "sqlite+aiosqlite:///:memory:"
+_test_engine = create_async_engine(TEST_ASYNC_URL, echo=False)
+_TestSession = async_sessionmaker(_test_engine, class_=AsyncSession, expire_on_commit=False)
+
+# 替换模块级引擎和会话工厂（lifespan 中 init_db 使用的是 app.database.engine）
+_db_module.engine = _test_engine
+_db_module.AsyncSessionLocal = _TestSession
+
 from app.database import Base, get_db
 from app.main import app
-
-# 同步引擎（用于 DDL 操作）
-SYNC_DB_URL = "mysql+pymysql://root:Qq987654321@host.docker.internal:3306/social_network_test"
-sync_engine = create_engine(SYNC_DB_URL, echo=False)
-
-# 异步引擎（用于测试会话）
-ASYNC_DB_URL = "mysql+aiomysql://root:Qq987654321@host.docker.internal:3306/social_network_test"
-test_async_engine = create_async_engine(ASYNC_DB_URL, echo=False, pool_pre_ping=False)
-TestAsyncSession = async_sessionmaker(test_async_engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @pytest.fixture(autouse=True)
 def _setup_db():
-    """每个测试前创建表并清理数据"""
-    Base.metadata.create_all(sync_engine)
-    with sync_engine.connect() as conn:
-        conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
-        for table in reversed(Base.metadata.sorted_tables):
-            conn.execute(text(f"TRUNCATE TABLE `{table.name}`"))
-        conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
-        conn.commit()
+    """每个测试前创建表，测试后删除所有表"""
+    loop = asyncio.new_event_loop()
+
+    async def _create():
+        async with _test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    loop.run_until_complete(_create())
+
     yield
+
+    async def _drop():
+        async with _test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+
+    loop.run_until_complete(_drop())
+    loop.close()
 
 
 async def _get_test_db():
     """获取测试数据库会话（异步）"""
-    async with TestAsyncSession() as session:
+    async with _TestSession() as session:
         try:
             yield session
             await session.commit()
